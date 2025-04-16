@@ -73,13 +73,6 @@ const listToolsHandler = async () => {
             workingDir: {
               type: "string",
               description: "Optional working directory override"
-            },
-            permissions: {
-              type: "array",
-              description: "Optional array of Deno permissions to grant",
-              items: {
-                type: "string"
-              }
             }
           },
           required: ["code"]
@@ -235,74 +228,38 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
   }
 };
 
-// Execute code with Deno
-const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null, permissions = []) => {
+// Execute code with Deno - Refactored to pipe code via stdin and always use --allow-all
+const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null) => {
   const startTime = Date.now();
   const executionWorkingDir = customWorkingDir || workingDir;
-  
+
   try {
-    // Create a temporary file for Deno execution
-    const fs = await import('fs');
-    const tempDir = path.join(executionWorkingDir, 'temp');
-    
-    // Create temp directory if it doesn't exist
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    
-    // Create a unique temporary file for Deno execution
-    // Use .ts extension to allow TypeScript code
-    const tempFile = path.join(tempDir, `deno-exec-${Date.now()}-${Math.random().toString(36).substring(2)}.ts`);
-    
-    // Write the code to the temp file
-    fs.writeFileSync(tempFile, code, 'utf8');
-    
     return new Promise((resolve) => {
-      // Build Deno command with permissions
-      const denoArgs = ['run'];
-      
-      // Add requested permissions
-      if (permissions && permissions.length > 0) {
-        permissions.forEach(perm => {
-          denoArgs.push(`--allow-${perm}`);
-        });
-      } else {
-        // Default permissions if none specified
-        denoArgs.push('--allow-read');
-        denoArgs.push('--allow-net');
-      }
-      
-      // Add the temp file
-      denoArgs.push(tempFile);
-      
+      // Build Deno command with --allow-all and stdin reading
+      const denoArgs = ['run', '--allow-all', '-']; // '-' tells Deno to read from stdin
+
       // Execute with Deno
-      const denoProcess = spawn('deno', denoArgs, { 
+      const denoProcess = spawn('deno', denoArgs, {
         cwd: executionWorkingDir,
         timeout,
-        env: process.env
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'] // Ensure stdio streams are piped
       });
-      
+
       let stdout = '';
       let stderr = '';
-      
+
       denoProcess.stdout.on('data', (data) => {
         stdout += data;
       });
-      
+
       denoProcess.stderr.on('data', (data) => {
         stderr += data;
       });
-      
+
       denoProcess.on('close', (code) => {
         // Calculate execution time
         const executionTimeMs = Date.now() - startTime;
-        
-        // Clean up temporary file
-        try {
-          fs.unlinkSync(tempFile);
-        } catch (err) {
-          console.error(`Failed to clean up temporary file: ${err.message}`);
-        }
         
         resolve({
           success: code === 0,
@@ -312,26 +269,24 @@ const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null, 
           code
         });
       });
-      
+
       denoProcess.on('error', (err) => {
-        // Clean up temporary file
-        try {
-          fs.unlinkSync(tempFile);
-        } catch (cleanupErr) {
-          console.error(`Failed to clean up temporary file: ${cleanupErr.message}`);
-        }
-        
         resolve({
           success: false,
           error: err.message,
           executionTimeMs: Date.now() - startTime
         });
       });
+
+      // Write code to stdin and close
+      denoProcess.stdin.write(code);
+      denoProcess.stdin.end();
     });
   } catch (err) {
     return {
       success: false,
-      error: err.message
+      error: err.message,
+      executionTimeMs: Date.now() - startTime // Ensure time is recorded even on early catch
     };
   }
 };
@@ -392,14 +347,14 @@ const callToolHandler = async (request) => {
     
     // Handle Deno execution
     if (name === 'executedeno' || name === 'mcp_mcp_repl_executedeno') {
-      const { code, timeout = 120000, workingDir: customWorkingDir = null, permissions = [] } = args;
+      const { code, timeout = 120000, workingDir: customWorkingDir = null } = args;
       
       if (!code) {
         throw new Error("Missing code argument for Deno execute tool");
       }
       
-      // Execute the code with Deno
-      const result = await executeDenoCode(code, timeout, customWorkingDir, permissions);
+      // Execute the code with Deno (no longer passing permissions)
+      const result = await executeDenoCode(code, timeout, customWorkingDir);
       
       // Create content array with output
       const outputLines = [];
