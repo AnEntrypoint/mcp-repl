@@ -21,9 +21,9 @@ For Cursor, update your `.cursor/mcp.json` configuration:
 {
   "mcpServers": {
     "mcp-repl": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "path/to/direct-node-executor.js", "path/to/your/project"
+        "-y", "mcp-repl", "path/to/your/project"
       ],
       "env": {},
       "disabled": false,
