@@ -27,7 +27,7 @@ For Cursor, update your `.cursor/mcp.json` configuration:
       ],
       "env": {},
       "disabled": false,
-      "autoApprove": ["execute"]
+      "autoApprove": ["executenode", "executedeno"]
     }
   }
 }
