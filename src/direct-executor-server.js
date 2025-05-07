@@ -9,13 +9,12 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from 'child_process';
+import { initialize, syncIndex, queryIndex } from './js-vector-indexer.js';
 
 // Get the working directory from command line or use current directory
 const workingDir = process.argv[2] 
     ? path.resolve(process.argv[2]) 
     : process.cwd();
-
-console.log(`Starting direct executor with working directory: ${workingDir}`);
 
 // Initialize the MCP server
 const server = new McpServer(
@@ -29,6 +28,17 @@ const server = new McpServer(
     },
   }
 );
+
+// Initialize code search on startup
+(async function initCodeSearch() {
+  try {
+    await initialize();
+    // Perform initial indexing of the working directory
+    await syncIndex([workingDir]);
+  } catch (error) {
+    // Silently handle errors
+  }
+})();
 
 // List available tools
 const listToolsHandler = async () => {
@@ -47,10 +57,6 @@ const listToolsHandler = async () => {
             timeout: {
               type: "number",
               description: "Optional timeout in milliseconds (default: 120000)"
-            },
-            workingDir: {
-              type: "string",
-              description: "Optional working directory override"
             }
           },
           required: ["code"]
@@ -69,13 +75,39 @@ const listToolsHandler = async () => {
             timeout: {
               type: "number",
               description: "Optional timeout in milliseconds (default: 120000)"
-            },
-            workingDir: {
-              type: "string",
-              description: "Optional working directory override"
             }
           },
           required: ["code"]
+        }
+      },
+      {
+        name: "searchcode",
+        description: "Semantic code search with metadata extraction and AST-aware chunking",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Semantic search query for code"
+            },
+            folders: {
+              type: "string",
+              description: "Optional comma-separated list of folders to search (defaults to working directory)"
+            },
+            extensions: {
+              type: "string",
+              description: "Optional comma-separated list of file extensions to include (default: js,ts)"
+            },
+            ignores: {
+              type: "string",
+              description: "Optional comma-separated list of patterns to ignore (default: node_modules)"
+            },
+            topK: {
+              type: "number",
+              description: "Optional number of results to return (default: 8)"
+            }
+          },
+          required: ["query"]
         }
       }
     ],
@@ -83,9 +115,8 @@ const listToolsHandler = async () => {
 };
 
 // Execute code function - simplified to pipe code into Node instead of using temp files
-const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
+const executeCode = async (code, timeout = 120000) => {
   const startTime = Date.now();
-  const executionWorkingDir = customWorkingDir || workingDir;
   
   try {
     // More robust detection if the code is likely CJS or ESM
@@ -106,7 +137,7 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
       // For CommonJS, create a temporary file since piping with --input-type=commonjs 
       // doesn't work reliably in all Node.js versions
       const fs = await import('fs');
-      const tempDir = path.join(executionWorkingDir, 'temp');
+      const tempDir = path.join(workingDir, 'temp');
       
       // Create temp directory if it doesn't exist
       if (!fs.existsSync(tempDir)) {
@@ -122,7 +153,7 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
       return new Promise((resolve) => {
         // Execute the file directly instead of piping for CJS
         const nodeProcess = spawn('node', [tempFile], { 
-          cwd: executionWorkingDir,
+          cwd: workingDir,
           timeout,
           env: process.env
         });
@@ -146,7 +177,7 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
           try {
             fs.unlinkSync(tempFile);
           } catch (err) {
-            console.error(`Failed to clean up temporary file: ${err.message}`);
+            // Silently handle cleanup errors
           }
           
           resolve({
@@ -163,7 +194,7 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
           try {
             fs.unlinkSync(tempFile);
           } catch (cleanupErr) {
-            console.error(`Failed to clean up temporary file: ${cleanupErr.message}`);
+            // Silently handle cleanup errors
           }
           
           resolve({
@@ -178,7 +209,7 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
       return new Promise((resolve) => {
         // Spawn Node.js process with stdin piping for ESM
         const nodeProcess = spawn('node', ['--input-type=module'], { 
-          cwd: executionWorkingDir,
+          cwd: workingDir,
           timeout,
           env: process.env
         });
@@ -229,9 +260,8 @@ const executeCode = async (code, timeout = 120000, customWorkingDir = null) => {
 };
 
 // Execute code with Deno - Refactored to pipe code via stdin and always use --allow-all
-const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null) => {
+const executeDenoCode = async (code, timeout = 120000) => {
   const startTime = Date.now();
-  const executionWorkingDir = customWorkingDir || workingDir;
 
   try {
     return new Promise((resolve) => {
@@ -240,7 +270,7 @@ const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null) 
 
       // Execute with Deno
       const denoProcess = spawn('deno', denoArgs, {
-        cwd: executionWorkingDir,
+        cwd: workingDir,
         timeout,
         env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'] // Ensure stdio streams are piped
@@ -291,6 +321,51 @@ const executeDenoCode = async (code, timeout = 120000, customWorkingDir = null) 
   }
 };
 
+// Handle code search requests
+const performCodeSearch = async (query, folders, extensions, ignores, topK) => {
+  const startTime = Date.now();
+  
+  try {
+    // Default to working directory if no folders provided
+    const searchFolders = folders 
+      ? folders.split(',').map(f => path.resolve(f.trim()))
+      : [workingDir];
+    
+    // Parse extensions and ignores
+    const searchExts = extensions 
+      ? extensions.split(',').map(e => e.trim().replace(/^\./, ''))
+      : ['js', 'ts'];
+      
+    const searchIgnores = ignores
+      ? ignores.split(',').map(i => i.trim())
+      : ['node_modules'];
+    
+    // Sync index with current file system
+    await syncIndex(searchFolders, searchExts, searchIgnores);
+    
+    // Run the query
+    const results = await queryIndex(query, topK || 8);
+    
+    // Calculate execution time
+    const executionTimeMs = Date.now() - startTime;
+    
+    return {
+      success: true,
+      results,
+      executionTimeMs,
+      searchFolders,
+      searchExts,
+      searchIgnores
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      executionTimeMs: Date.now() - startTime
+    };
+  }
+};
+
 // Handle code execution requests
 const callToolHandler = async (request) => {
   try {
@@ -298,14 +373,14 @@ const callToolHandler = async (request) => {
     
     // Handle Node.js execution
     if (name === 'executenodejs' || name === 'execute' || name === 'mcp_mcp_repl_execute') {
-      const { code, timeout = 120000, workingDir: customWorkingDir = null } = args;
+      const { code, timeout = 120000 } = args;
       
       if (!code) {
         throw new Error("Missing code argument for execute tool");
       }
       
-      // Execute the code with Node.js
-      const result = await executeCode(code, timeout, customWorkingDir);
+      // Execute the code with Node.js (ignore any workingDir passed in args)
+      const result = await executeCode(code, timeout);
       
       // Create content array with output
       const outputLines = [];
@@ -347,14 +422,14 @@ const callToolHandler = async (request) => {
     
     // Handle Deno execution
     if (name === 'executedeno' || name === 'mcp_mcp_repl_executedeno') {
-      const { code, timeout = 120000, workingDir: customWorkingDir = null } = args;
+      const { code, timeout = 120000 } = args;
       
       if (!code) {
         throw new Error("Missing code argument for Deno execute tool");
       }
       
-      // Execute the code with Deno (no longer passing permissions)
-      const result = await executeDenoCode(code, timeout, customWorkingDir);
+      // Execute the code with Deno (ignore any workingDir passed in args)
+      const result = await executeDenoCode(code, timeout);
       
       // Create content array with output
       const outputLines = [];
@@ -394,6 +469,81 @@ const callToolHandler = async (request) => {
       };
     }
     
+    // Handle code search
+    if (name === 'searchcode' || name === 'mcp_mcp_repl_searchcode') {
+      const { query, folders, extensions, ignores, topK } = args;
+      
+      if (!query) {
+        throw new Error("Missing query argument for code search tool");
+      }
+      
+      // Perform code search
+      const result = await performCodeSearch(query, folders, extensions, ignores, topK);
+      
+      // Create content array with output
+      const outputLines = [];
+      
+      if (result.success) {
+        // Add a header summarizing search configuration
+        outputLines.push({
+          type: 'text',
+          text: `Code search for "${query}"\nSearched in: ${result.searchFolders.join(', ')}\nIncluded extensions: ${result.searchExts.join(', ')}\nIgnored patterns: ${result.searchIgnores.join(', ')}`
+        });
+        
+        if (result.results.length === 0) {
+          outputLines.push({
+            type: 'text',
+            text: 'No results found.'
+          });
+        } else {
+          // Add formatted results
+          outputLines.push({
+            type: 'text',
+            text: `Found ${result.results.length} result(s):`
+          });
+          
+          // Add each result
+          for (const res of result.results) {
+            const title = `[${res.score}] ${res.file}:${res.startLine}-${res.endLine} - ${res.type} ${res.qualifiedName}`;
+            let details = [];
+            
+            if (res.parameters) details.push(`Parameters: ${res.parameters}`);
+            if (res.parameterTypes) details.push(`Parameter types: ${res.parameterTypes}`);
+            if (res.returnType) details.push(`Return type: ${res.returnType}`);
+            if (res.parentClass) details.push(`Parent class: ${res.parentClass}`);
+            if (res.extends) details.push(`Extends: ${res.extends}`);
+            if (res.doc) details.push(`Doc: ${res.doc}`);
+            if (res.controlFlow && res.controlFlow.length > 0) {
+              details.push(`Contains: ${res.controlFlow.join(', ')}`);
+            }
+            details.push(`Lines: ${res.lines}, Tokens: ${res.tokens}`);
+            if (res.code) details.push(`Code snippet: ${res.code}`);
+            
+            outputLines.push({
+              type: 'text',
+              text: `${title}\n${details.join('\n')}`
+            });
+          }
+        }
+        
+        // Add execution summary
+        outputLines.push({
+          type: 'text',
+          text: `Search completed in ${result.executionTimeMs}ms`
+        });
+      } else {
+        // Add error message if search failed
+        outputLines.push({
+          type: 'text',
+          text: `ERROR: ${result.error}`
+        });
+      }
+      
+      return {
+        content: outputLines
+      };
+    }
+    
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
     return {
@@ -411,14 +561,13 @@ const callToolHandler = async (request) => {
 server.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
 server.setRequestHandler(CallToolRequestSchema, callToolHandler);
 
-// Global error handlers
+// Global error handlers that are silent to keep stdio clean
 process.on('uncaughtException', (err) => {
-  console.error(`UNCAUGHT EXCEPTION: ${err.message}`);
-  console.error(err.stack);
+  // Silently handle uncaught exceptions
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error(`UNHANDLED REJECTION: ${reason}`);
+  // Silently handle unhandled rejections
 });
 
 // Start the server
@@ -428,12 +577,21 @@ async function main() {
     const stdioTransport = new StdioServerTransport();
     await server.connect(stdioTransport);
     
-    console.error('Direct Node.js executor server started. Waiting for MCP requests...');
+    // Add a keep-alive mechanism to prevent the process from exiting
+    setInterval(() => {
+      // This is a no-op interval that keeps the Node.js event loop active
+    }, 60000);
+    
+    // Also handle the SIGINT signal explicitly
+    process.on('SIGINT', () => {
+      process.exit(0);
+    });
   } catch (error) {
+    // Only log critical startup errors that prevent the server from running
     console.error(`Error starting server: ${error.message}`);
     process.exit(1);
   }
 }
 
 // Run the server
-main(); 
+main();
