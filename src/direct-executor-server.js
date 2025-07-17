@@ -2,6 +2,27 @@
 // Simple Node.js direct executor server using MCP SDK
 
 import * as path from 'node:path';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+// Handle version flag
+if (process.argv.includes('--version') || process.argv.includes('-v')) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  console.log(pkg.version);
+  process.exit(0);
+}
+
+// Handle help flag
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log('MCP REPL - Code execution and semantic search server');
+  console.log('Usage: mcp-repl [working-directory]');
+  console.log('Options:');
+  console.log('  --version, -v    Show version');
+  console.log('  --help, -h       Show help');
+  process.exit(0);
+}
+
 import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js"; 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -9,10 +30,18 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from 'child_process';
-import { initialize, syncIndex, queryIndex } from './js-vector-indexer.js';
+
+// Lazy load vector indexer to avoid startup issues
+let vectorIndexer = null;
+const getVectorIndexer = async () => {
+  if (!vectorIndexer) {
+    vectorIndexer = await import('./js-vector-indexer.js');
+  }
+  return vectorIndexer;
+};
 
 // Get the working directory from command line or use current directory
-const workingDir = process.argv[2] 
+const workingDir = process.argv[2] && !process.argv[2].startsWith('-')
     ? path.resolve(process.argv[2]) 
     : process.cwd();
 
@@ -32,6 +61,7 @@ const server = new McpServer(
 // Initialize code search on startup
 (async function initCodeSearch() {
   try {
+    const { initialize, syncIndex } = await getVectorIndexer();
     await initialize();
     // Perform initial indexing of the working directory
     await syncIndex([workingDir]);
@@ -46,13 +76,13 @@ const listToolsHandler = async () => {
     tools: [
       {
         name: "executenodejs",
-        description: "Execute JavaScript code directly with Node.js - supports ESM imports and all Node.js features",
+        description: "Execute JavaScript code directly with Node.js - supports ESM imports and all Node.js features. \n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved",
         inputSchema: {
           type: "object",
           properties: {
             code: {
               type: "string",
-              description: "JavaScript code to execute"
+              description: "JavaScript code to execute - use for debugging, testing hypotheses, and investigation"
             },
             timeout: {
               type: "number",
@@ -64,13 +94,13 @@ const listToolsHandler = async () => {
       },
       {
         name: "executedeno",
-        description: "Execute JavaScript/TypeScript code with Deno - supports ESM imports and all Deno features",
+        description: "Execute JavaScript/TypeScript code with Deno - supports ESM imports and all Deno features. \n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n- Great for TypeScript debugging and type checking\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved\n\nWEB REQUESTS: Use fetch() instead of curl for HTTP requests",
         inputSchema: {
           type: "object",
           properties: {
             code: {
               type: "string",
-              description: "JavaScript/TypeScript code to execute"
+              description: "JavaScript/TypeScript code to execute - use for debugging, testing hypotheses, and investigation"
             },
             timeout: {
               type: "number",
@@ -341,21 +371,30 @@ const performCodeSearch = async (query, folders, extensions, ignores, topK) => {
       : ['node_modules'];
     
     // Sync index with current file system
+    const { syncIndex } = await getVectorIndexer();
     await syncIndex(searchFolders, searchExts, searchIgnores);
     
     // Run the query
+    const { queryIndex } = await getVectorIndexer();
     const results = await queryIndex(query, topK || 8);
+    
+    // Use results as-is from the vector indexer
+    const enhancedResults = results;
     
     // Calculate execution time
     const executionTimeMs = Date.now() - startTime;
     
     return {
       success: true,
-      results,
+      results: enhancedResults,
       executionTimeMs,
       searchFolders,
       searchExts,
-      searchIgnores
+      searchIgnores,
+      metadata: {
+        structuralSearch: true,
+        indexedTypes: ['file', 'function', 'class', 'method', 'property', 'import', 'export']
+      }
     };
   } catch (error) {
     return {
@@ -507,16 +546,18 @@ const callToolHandler = async (request) => {
             const title = `[${res.score}] ${res.file}:${res.startLine}-${res.endLine} - ${res.type} ${res.qualifiedName}`;
             let details = [];
             
-            if (res.parameters) details.push(`Parameters: ${res.parameters}`);
-            if (res.parameterTypes) details.push(`Parameter types: ${res.parameterTypes}`);
-            if (res.returnType) details.push(`Return type: ${res.returnType}`);
-            if (res.parentClass) details.push(`Parent class: ${res.parentClass}`);
-            if (res.extends) details.push(`Extends: ${res.extends}`);
-            if (res.doc) details.push(`Doc: ${res.doc}`);
-            if (res.controlFlow && res.controlFlow.length > 0) {
-              details.push(`Contains: ${res.controlFlow.join(', ')}`);
+            if (res.structure?.parameters && res.structure.parameters.length > 0) {
+              const paramText = res.structure.parameters.map(p => `${p.name}${p.type ? `: ${p.type}` : ''}`).join(', ');
+              details.push(`Parameters: ${paramText}`);
             }
-            details.push(`Lines: ${res.lines}, Tokens: ${res.tokens}`);
+            if (res.structure?.returnType) details.push(`Return type: ${res.structure.returnType}`);
+            if (res.structure?.parentClass) details.push(`Parent class: ${res.structure.parentClass}`);
+            if (res.structure?.inheritsFrom) details.push(`Extends: ${res.structure.inheritsFrom}`);
+            if (res.doc) details.push(`Doc: ${res.doc}`);
+            if (res.structure?.calls && res.structure.calls.length > 0) {
+              details.push(`Calls: ${res.structure.calls.join(', ')}`);
+            }
+            details.push(`Lines: ${res.lines}`);
             if (res.code) details.push(`Code snippet: ${res.code}`);
             
             outputLines.push({
