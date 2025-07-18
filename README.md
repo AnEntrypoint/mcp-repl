@@ -1,4 +1,4 @@
-# 🚀 Direct Node.js REPL Executor
+# 🚀 MCP REPL Executor
 
 ![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-green)
