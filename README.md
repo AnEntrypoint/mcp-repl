@@ -16,8 +16,7 @@ A streamlined direct Node.js execution environment that enables seamless code ex
 ## 🧩 Configuration
 
 For Claude Code:
-claude mcp add repl -- "npx" "-y" "mcp-repl" "path/to/your/project"
-
+claude mcp add repl -- "npx" "-y" "mcp-repl"
 For Cursor, update your `.cursor/mcp.json` configuration:
 
 ```json
@@ -26,7 +25,7 @@ For Cursor, update your `.cursor/mcp.json` configuration:
     "mcp-repl": {
       "command": "npx",
       "args": [
-        "-y", "mcp-repl", "path/to/your/project"
+        "-y", "mcp-repl"
       ],
       "env": {},
       "disabled": false,
