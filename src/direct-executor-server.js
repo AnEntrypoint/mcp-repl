@@ -30,6 +30,44 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from 'child_process';
+import { existsSync, statSync } from 'fs';
+
+// Working directory validation and resolution function
+const validateWorkingDirectory = (workingDirectory, defaultWorkingDir) => {
+  if (!workingDirectory) {
+    return { valid: true, effectiveDir: defaultWorkingDir };
+  }
+  
+  try {
+    const resolvedPath = path.resolve(workingDirectory);
+    
+    if (!existsSync(resolvedPath)) {
+      return { 
+        valid: false, 
+        error: `Working directory '${workingDirectory}' does not exist`,
+        effectiveDir: null
+      };
+    }
+    
+    const stats = statSync(resolvedPath);
+    
+    if (!stats.isDirectory()) {
+      return { 
+        valid: false, 
+        error: `Working directory '${workingDirectory}' is not a directory`,
+        effectiveDir: null
+      };
+    }
+    
+    return { valid: true, effectiveDir: resolvedPath };
+  } catch (error) {
+    return { 
+      valid: false, 
+      error: `Working directory '${workingDirectory}' is not accessible: ${error.message}`,
+      effectiveDir: null
+    };
+  }
+};
 
 // Lazy load vector indexer to avoid startup issues
 let vectorIndexer = null;
@@ -66,7 +104,10 @@ const server = new McpServer(
     // Perform initial indexing of the working directory
     await syncIndex([workingDir]);
   } catch (error) {
-    // Silently handle errors
+    // Log initialization errors for debugging while keeping MCP clean
+    if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+      console.error(`[DEBUG] Code search initialization failed: ${error.message}`);
+    }
   }
 })();
 
@@ -87,6 +128,10 @@ const listToolsHandler = async () => {
             timeout: {
               type: "number",
               description: "Optional timeout in milliseconds (default: 120000)"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
             }
           },
           required: ["code"]
@@ -105,6 +150,10 @@ const listToolsHandler = async () => {
             timeout: {
               type: "number",
               description: "Optional timeout in milliseconds (default: 120000)"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
             }
           },
           required: ["code"]
@@ -135,6 +184,10 @@ const listToolsHandler = async () => {
             topK: {
               type: "number",
               description: "Optional number of results to return (default: 8)"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
             }
           },
           required: ["query"]
@@ -145,8 +198,20 @@ const listToolsHandler = async () => {
 };
 
 // Execute code function - simplified to pipe code into Node instead of using temp files
-const executeCode = async (code, timeout = 120000) => {
+const executeCode = async (code, timeout = 120000, workingDirectory = null) => {
   const startTime = Date.now();
+  
+  // Validate and resolve working directory
+  const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
+  if (!dirValidation.valid) {
+    return {
+      success: false,
+      error: dirValidation.error,
+      executionTimeMs: Date.now() - startTime
+    };
+  }
+  
+  const effectiveWorkingDir = dirValidation.effectiveDir;
   
   try {
     // More robust detection if the code is likely CJS or ESM
@@ -167,7 +232,7 @@ const executeCode = async (code, timeout = 120000) => {
       // For CommonJS, create a temporary file since piping with --input-type=commonjs 
       // doesn't work reliably in all Node.js versions
       const fs = await import('fs');
-      const tempDir = path.join(workingDir, 'temp');
+      const tempDir = path.join(effectiveWorkingDir, 'temp');
       
       // Create temp directory if it doesn't exist
       if (!fs.existsSync(tempDir)) {
@@ -183,7 +248,7 @@ const executeCode = async (code, timeout = 120000) => {
       return new Promise((resolve) => {
         // Execute the file directly instead of piping for CJS
         const nodeProcess = spawn('node', [tempFile], { 
-          cwd: workingDir,
+          cwd: effectiveWorkingDir,
           timeout,
           env: process.env
         });
@@ -239,7 +304,7 @@ const executeCode = async (code, timeout = 120000) => {
       return new Promise((resolve) => {
         // Spawn Node.js process with stdin piping for ESM
         const nodeProcess = spawn('node', ['--input-type=module'], { 
-          cwd: workingDir,
+          cwd: effectiveWorkingDir,
           timeout,
           env: process.env
         });
@@ -290,8 +355,20 @@ const executeCode = async (code, timeout = 120000) => {
 };
 
 // Execute code with Deno - Refactored to pipe code via stdin and always use --allow-all
-const executeDenoCode = async (code, timeout = 120000) => {
+const executeDenoCode = async (code, timeout = 120000, workingDirectory = null) => {
   const startTime = Date.now();
+  
+  // Validate and resolve working directory
+  const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
+  if (!dirValidation.valid) {
+    return {
+      success: false,
+      error: dirValidation.error,
+      executionTimeMs: Date.now() - startTime
+    };
+  }
+  
+  const effectiveWorkingDir = dirValidation.effectiveDir;
 
   try {
     return new Promise((resolve) => {
@@ -300,7 +377,7 @@ const executeDenoCode = async (code, timeout = 120000) => {
 
       // Execute with Deno
       const denoProcess = spawn('deno', denoArgs, {
-        cwd: workingDir,
+        cwd: effectiveWorkingDir,
         timeout,
         env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'] // Ensure stdio streams are piped
@@ -352,14 +429,26 @@ const executeDenoCode = async (code, timeout = 120000) => {
 };
 
 // Handle code search requests
-const performCodeSearch = async (query, folders, extensions, ignores, topK) => {
+const performCodeSearch = async (query, folders, extensions, ignores, topK, workingDirectory = null) => {
   const startTime = Date.now();
   
+  // Validate and resolve working directory
+  const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
+  if (!dirValidation.valid) {
+    return {
+      success: false,
+      error: dirValidation.error,
+      executionTimeMs: Date.now() - startTime
+    };
+  }
+  
+  const effectiveWorkingDir = dirValidation.effectiveDir;
+  
   try {
-    // Default to working directory if no folders provided
+    // Default to effective working directory if no folders provided
     const searchFolders = folders 
       ? folders.split(',').map(f => path.resolve(f.trim()))
-      : [workingDir];
+      : [effectiveWorkingDir];
     
     // Parse extensions and ignores
     const searchExts = extensions 
@@ -412,14 +501,14 @@ const callToolHandler = async (request) => {
     
     // Handle Node.js execution
     if (name === 'executenodejs' || name === 'execute' || name === 'mcp_mcp_repl_execute') {
-      const { code, timeout = 120000 } = args;
+      const { code, timeout = 120000, workingDirectory } = args;
       
       if (!code) {
         throw new Error("Missing code argument for execute tool");
       }
       
-      // Execute the code with Node.js (ignore any workingDir passed in args)
-      const result = await executeCode(code, timeout);
+      // Execute the code with Node.js
+      const result = await executeCode(code, timeout, workingDirectory);
       
       // Create content array with output
       const outputLines = [];
@@ -461,14 +550,14 @@ const callToolHandler = async (request) => {
     
     // Handle Deno execution
     if (name === 'executedeno' || name === 'mcp_mcp_repl_executedeno') {
-      const { code, timeout = 120000 } = args;
+      const { code, timeout = 120000, workingDirectory } = args;
       
       if (!code) {
         throw new Error("Missing code argument for Deno execute tool");
       }
       
-      // Execute the code with Deno (ignore any workingDir passed in args)
-      const result = await executeDenoCode(code, timeout);
+      // Execute the code with Deno
+      const result = await executeDenoCode(code, timeout, workingDirectory);
       
       // Create content array with output
       const outputLines = [];
@@ -510,14 +599,14 @@ const callToolHandler = async (request) => {
     
     // Handle code search
     if (name === 'searchcode' || name === 'mcp_mcp_repl_searchcode') {
-      const { query, folders, extensions, ignores, topK } = args;
+      const { query, folders, extensions, ignores, topK, workingDirectory } = args;
       
       if (!query) {
         throw new Error("Missing query argument for code search tool");
       }
       
       // Perform code search
-      const result = await performCodeSearch(query, folders, extensions, ignores, topK);
+      const result = await performCodeSearch(query, folders, extensions, ignores, topK, workingDirectory);
       
       // Create content array with output
       const outputLines = [];
@@ -602,13 +691,23 @@ const callToolHandler = async (request) => {
 server.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
 server.setRequestHandler(CallToolRequestSchema, callToolHandler);
 
-// Global error handlers that are silent to keep stdio clean
+// Global error handlers with structured logging for debugging
 process.on('uncaughtException', (err) => {
-  // Silently handle uncaught exceptions
+  // Log critical errors to stderr with context for debugging
+  console.error(`[CRITICAL] Uncaught exception: ${err.message}`);
+  if (err.stack && (process.env.NODE_ENV === 'development' || process.env.DEBUG)) {
+    console.error(err.stack);
+  }
+  process.exit(1); // Exit on uncaught exceptions to prevent undefined state
 });
 
 process.on('unhandledRejection', (reason) => {
-  // Silently handle unhandled rejections
+  // Log unhandled rejections with context for debugging
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[ERROR] Unhandled rejection: ${message}`);
+  if (reason instanceof Error && reason.stack && (process.env.NODE_ENV === 'development' || process.env.DEBUG)) {
+    console.error(reason.stack);
+  }
 });
 
 // Start the server
