@@ -31,43 +31,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from 'child_process';
 import { existsSync, statSync } from 'fs';
-
-// Working directory validation and resolution function
-const validateWorkingDirectory = (workingDirectory, defaultWorkingDir) => {
-  if (!workingDirectory) {
-    return { valid: true, effectiveDir: defaultWorkingDir };
-  }
-  
-  try {
-    const resolvedPath = path.resolve(workingDirectory);
-    
-    if (!existsSync(resolvedPath)) {
-      return { 
-        valid: false, 
-        error: `Working directory '${workingDirectory}' does not exist`,
-        effectiveDir: null
-      };
-    }
-    
-    const stats = statSync(resolvedPath);
-    
-    if (!stats.isDirectory()) {
-      return { 
-        valid: false, 
-        error: `Working directory '${workingDirectory}' is not a directory`,
-        effectiveDir: null
-      };
-    }
-    
-    return { valid: true, effectiveDir: resolvedPath };
-  } catch (error) {
-    return { 
-      valid: false, 
-      error: `Working directory '${workingDirectory}' is not accessible: ${error.message}`,
-      effectiveDir: null
-    };
-  }
-};
+import { validateWorkingDirectory } from './validation-utils.js';
 
 // Lazy load vector indexer to avoid startup issues
 let vectorIndexer = null;
@@ -76,6 +40,27 @@ const getVectorIndexer = async () => {
     vectorIndexer = await import('./js-vector-indexer.js');
   }
   return vectorIndexer;
+};
+
+// Lazy load ast-grep utilities
+let astgrepUtils = null;
+let astgrepAdvanced = null;
+let astgrepHandlers = null;
+let astgrepHandlersAdvanced = null;
+const getAstGrepUtils = async () => {
+  if (!astgrepUtils) {
+    astgrepUtils = await import('./astgrep-utils.js');
+  }
+  if (!astgrepAdvanced) {
+    astgrepAdvanced = await import('./astgrep-advanced.js');
+  }
+  if (!astgrepHandlers) {
+    astgrepHandlers = await import('./astgrep-handlers.js');
+  }
+  if (!astgrepHandlersAdvanced) {
+    astgrepHandlersAdvanced = await import('./astgrep-handlers-advanced.js');
+  }
+  return { astgrepUtils, astgrepAdvanced, astgrepHandlers, astgrepHandlersAdvanced };
 };
 
 // Get the working directory from command line or use current directory
@@ -191,6 +176,149 @@ const listToolsHandler = async () => {
             }
           },
           required: ["query"]
+        }
+      },
+      {
+        name: "astgrep_search",
+        description: "Pattern-based code search using ast-grep - find code patterns using AST matching",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pattern: {
+              type: "string",
+              description: "AST pattern to search for (e.g., 'function $NAME($$$ARGS) { $$$ }')"
+            },
+            language: {
+              type: "string",
+              description: "Programming language (javascript, typescript, python, etc.)"
+            },
+            paths: {
+              type: "array",
+              items: { type: "string" },
+              description: "Specific paths to search (defaults to current directory)"
+            },
+            context: {
+              type: "number",
+              description: "Number of context lines to include"
+            },
+            strictness: {
+              type: "string",
+              enum: ["cst", "smart", "ast", "relaxed"],
+              description: "Pattern matching strictness level"
+            },
+            outputFormat: {
+              type: "string",
+              enum: ["compact", "pretty"],
+              description: "Output format"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
+            }
+          },
+          required: ["pattern"]
+        }
+      },
+      {
+        name: "astgrep_replace",
+        description: "Code transformation using ast-grep rewrite patterns",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pattern: {
+              type: "string",
+              description: "AST pattern to match"
+            },
+            replacement: {
+              type: "string",
+              description: "Replacement pattern"
+            },
+            language: {
+              type: "string",
+              description: "Programming language"
+            },
+            paths: {
+              type: "array",
+              items: { type: "string" },
+              description: "Specific paths to transform"
+            },
+            dryRun: {
+              type: "boolean",
+              description: "Preview changes without applying them"
+            },
+            interactive: {
+              type: "boolean",
+              description: "Interactive mode for confirmation"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
+            }
+          },
+          required: ["pattern", "replacement"]
+        }
+      },
+      {
+        name: "astgrep_lint",
+        description: "Rule-based code validation using ast-grep YAML rules",
+        inputSchema: {
+          type: "object",
+          properties: {
+            rules: {
+              type: "string",
+              description: "YAML rule content or path to rule file"
+            },
+            paths: {
+              type: "array",
+              items: { type: "string" },
+              description: "Specific paths to validate"
+            },
+            severity: {
+              type: "string",
+              enum: ["error", "warning", "info", "hint"],
+              description: "Minimum severity level"
+            },
+            format: {
+              type: "string",
+              enum: ["json", "text"],
+              description: "Output format"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
+            }
+          },
+          required: ["rules"]
+        }
+      },
+      {
+        name: "astgrep_analyze",
+        description: "AST structure analysis and debugging using ast-grep",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pattern: {
+              type: "string",
+              description: "AST pattern to analyze"
+            },
+            language: {
+              type: "string",
+              description: "Programming language"
+            },
+            debugQuery: {
+              type: "boolean",
+              description: "Enable debug mode for query analysis"
+            },
+            showFullTree: {
+              type: "boolean",
+              description: "Show full AST tree context"
+            },
+            workingDirectory: {
+              type: "string",
+              description: "Optional working directory for the operation (defaults to server working directory)"
+            }
+          },
+          required: ["pattern"]
         }
       }
     ],
@@ -672,6 +800,30 @@ const callToolHandler = async (request) => {
       return {
         content: outputLines
       };
+    }
+    
+    // Handle ast-grep search
+    if (name === 'astgrep_search') {
+      const { astgrepHandlers } = await getAstGrepUtils();
+      return await astgrepHandlers.handleAstGrepSearch(args, workingDir, getAstGrepUtils);
+    }
+    
+    // Handle ast-grep replace
+    if (name === 'astgrep_replace') {
+      const { astgrepHandlers } = await getAstGrepUtils();
+      return await astgrepHandlers.handleAstGrepReplace(args, workingDir, getAstGrepUtils);
+    }
+    
+    // Handle ast-grep lint
+    if (name === 'astgrep_lint') {
+      const { astgrepHandlersAdvanced } = await getAstGrepUtils();
+      return await astgrepHandlersAdvanced.handleAstGrepLint(args, workingDir, getAstGrepUtils);
+    }
+    
+    // Handle ast-grep analyze
+    if (name === 'astgrep_analyze') {
+      const { astgrepHandlersAdvanced } = await getAstGrepUtils();
+      return await astgrepHandlersAdvanced.handleAstGrepAnalyze(args, workingDir, getAstGrepUtils);
     }
     
     throw new Error(`Unknown tool: ${name}`);
