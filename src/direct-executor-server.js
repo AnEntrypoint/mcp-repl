@@ -329,6 +329,13 @@ const listToolsHandler = async () => {
 const executeCode = async (code, timeout = 120000, workingDirectory = null) => {
   const startTime = Date.now();
   
+  // DEBUG: Log parameters and server state
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] executeCode called with workingDirectory: ${workingDirectory}`);
+    console.error(`[DEBUG] Server startup workingDir: ${workingDir}`);
+    console.error(`[DEBUG] Server process.cwd(): ${process.cwd()}`);
+  }
+  
   // Validate and resolve working directory
   const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
   if (!dirValidation.valid) {
@@ -340,6 +347,11 @@ const executeCode = async (code, timeout = 120000, workingDirectory = null) => {
   }
   
   const effectiveWorkingDir = dirValidation.effectiveDir;
+  
+  // DEBUG: Log effective working directory
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] Effective working directory: ${effectiveWorkingDir}`);
+  }
   
   try {
     // More robust detection if the code is likely CJS or ESM
@@ -486,6 +498,12 @@ const executeCode = async (code, timeout = 120000, workingDirectory = null) => {
 const executeDenoCode = async (code, timeout = 120000, workingDirectory = null) => {
   const startTime = Date.now();
   
+  // DEBUG: Log parameters and server state
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] executeDenoCode called with workingDirectory: ${workingDirectory}`);
+    console.error(`[DEBUG] Server startup workingDir: ${workingDir}`);
+  }
+  
   // Validate and resolve working directory
   const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
   if (!dirValidation.valid) {
@@ -497,6 +515,11 @@ const executeDenoCode = async (code, timeout = 120000, workingDirectory = null) 
   }
   
   const effectiveWorkingDir = dirValidation.effectiveDir;
+  
+  // DEBUG: Log effective working directory
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] Deno effective working directory: ${effectiveWorkingDir}`);
+  }
 
   try {
     return new Promise((resolve) => {
@@ -560,6 +583,12 @@ const executeDenoCode = async (code, timeout = 120000, workingDirectory = null) 
 const performCodeSearch = async (query, folders, extensions, ignores, topK, workingDirectory = null) => {
   const startTime = Date.now();
   
+  // DEBUG: Log parameters and server state
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] performCodeSearch called with workingDirectory: ${workingDirectory}`);
+    console.error(`[DEBUG] Server startup workingDir: ${workingDir}`);
+  }
+  
   // Validate and resolve working directory
   const dirValidation = validateWorkingDirectory(workingDirectory, workingDir);
   if (!dirValidation.valid) {
@@ -571,6 +600,11 @@ const performCodeSearch = async (query, folders, extensions, ignores, topK, work
   }
   
   const effectiveWorkingDir = dirValidation.effectiveDir;
+  
+  // DEBUG: Log effective working directory
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+    console.error(`[DEBUG] Search effective working directory: ${effectiveWorkingDir}`);
+  }
   
   try {
     // Default to effective working directory if no folders provided
