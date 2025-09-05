@@ -173,7 +173,8 @@ const listToolsHandler = async () => {
   // Add tools from JSON
   for (const toolName of toolOrder) {
     if (toolDescriptions[toolName]) {
-      tools.push(toolDescriptions[toolName]);
+      // Ensure each tool object includes its `name` (some JSON entries omit it)
+      tools.push(Object.assign({ name: toolName }, toolDescriptions[toolName]));
     }
   }
   
@@ -182,7 +183,7 @@ const listToolsHandler = async () => {
   
   // Add the batch_execute tool from JSON
   if (toolDescriptions.batch_execute) {
-    tools.push(toolDescriptions.batch_execute);
+    tools.push(Object.assign({ name: 'batch_execute' }, toolDescriptions.batch_execute));
   }
   
   return { tools };
