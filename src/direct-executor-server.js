@@ -102,7 +102,7 @@ const listToolsHandler = async () => {
     tools: [
       {
         name: "executenodejs",
-        description: "Execute JavaScript code directly with Node.js - supports ESM imports and all Node.js features. \n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved",
+        description: "Execute JavaScript code directly with Node.js - supports ESM imports and all Node.js features. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple operations into single calls - 10x more efficient than individual calls\n- Combine testing, validation, file operations, and API calls in one execution\n- Use arrays/loops to process multiple items at once\n- Consolidate related logic instead of making separate tool calls\n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved",
         inputSchema: {
           type: "object",
           properties: {
@@ -124,7 +124,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "executedeno",
-        description: "Execute JavaScript/TypeScript code with Deno - supports ESM imports and all Deno features. \n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n- Great for TypeScript debugging and type checking\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved\n\nWEB REQUESTS: Use fetch() instead of curl for HTTP requests",
+        description: "Execute JavaScript/TypeScript code with Deno - supports ESM imports and all Deno features. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple operations into single calls - 10x more efficient than individual calls\n- Combine testing, validation, file operations, and API calls in one execution\n- Use arrays/loops to process multiple items at once\n- Consolidate related logic instead of making separate tool calls\n\nDEBUGGING GUIDANCE:\n- Use this tool for all debugging and investigation tasks instead of external CLI tools\n- Break problems into testable hypotheses and verify them with code execution\n- Test APIs, data structures, and logic incrementally\n- Use console.log for debugging output and JSON.stringify for complex objects\n- Always prefer this over CLI tools like curl, wget, or external commands\n- Great for TypeScript debugging and type checking\n\nAPPROACH:\n1. Form a hypothesis about what might be wrong\n2. Write focused test code to verify the hypothesis\n3. Execute and analyze results\n4. Refine hypothesis based on findings\n5. Iterate until problem is solved\n\nWEB REQUESTS: Use fetch() instead of curl for HTTP requests",
         inputSchema: {
           type: "object",
           properties: {
@@ -146,7 +146,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "searchcode",
-        description: "Semantic code search with metadata extraction and AST-aware chunking",
+        description: "Semantic code search with metadata extraction and AST-aware chunking. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple search queries when exploring related concepts - 10x more efficient\n- Use broad queries to gather comprehensive results rather than narrow sequential searches\n- Combine multiple search terms in single queries when investigating related functionality\n- Prefer fewer comprehensive searches over many specific ones",
         inputSchema: {
           type: "object",
           properties: {
@@ -180,7 +180,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "astgrep_search",
-        description: "Pattern-based code search using ast-grep - find code patterns using AST matching",
+        description: "Pattern-based code search using ast-grep - find code patterns using AST matching. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple pattern searches when analyzing code structure - 10x more efficient\n- Use broader patterns to capture multiple related constructs in one search\n- Combine related pattern searches rather than making sequential calls\n- Prefer comprehensive pattern matching over incremental searches",
         inputSchema: {
           type: "object",
           properties: {
@@ -221,7 +221,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "astgrep_replace",
-        description: "Code transformation using ast-grep rewrite patterns",
+        description: "Code transformation using ast-grep rewrite patterns. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple transformations when refactoring - 10x more efficient\n- Use comprehensive patterns to transform multiple related constructs at once\n- Plan transformations to handle all related cases in single operations\n- Avoid sequential transformation calls when batch operations are possible",
         inputSchema: {
           type: "object",
           properties: {
@@ -260,7 +260,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "astgrep_lint",
-        description: "Rule-based code validation using ast-grep YAML rules",
+        description: "Rule-based code validation using ast-grep YAML rules. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple validation rules when checking code quality - 10x more efficient\n- Create comprehensive rule sets to validate multiple concerns at once\n- Combine related validation checks rather than running them separately\n- Use broad rule patterns to catch multiple issues in single operations",
         inputSchema: {
           type: "object",
           properties: {
@@ -293,7 +293,7 @@ const listToolsHandler = async () => {
       },
       {
         name: "astgrep_analyze",
-        description: "AST structure analysis and debugging using ast-grep",
+        description: "AST structure analysis and debugging using ast-grep. \n\nEFFICIENCY GUIDANCE (CRITICAL):\n- BATCH multiple analysis patterns when exploring code structure - 10x more efficient\n- Use comprehensive patterns to analyze multiple structural elements at once\n- Combine related analysis queries rather than making sequential calls\n- Prefer broad structural analysis over incremental pattern checking",
         inputSchema: {
           type: "object",
           properties: {
