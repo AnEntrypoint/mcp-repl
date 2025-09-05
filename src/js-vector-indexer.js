@@ -271,6 +271,19 @@ function isExported(content, position) {
   return currentLine.includes('export ');
 }
 
+// Calculate token count (simplified approximation)
+function calculateTokenCount(code) {
+  if (!code || typeof code !== 'string') return 0;
+  
+  // Clean the code and count meaningful tokens
+  const cleanedCode = code.trim();
+  if (!cleanedCode) return 0;
+  
+  // Count words, numbers, and meaningful punctuation as tokens
+  const tokens = cleanedCode.match(/\b\w+\b|[{}();,=+\-*\/\[\]<>!&|.]/g) || [];
+  return tokens.length;
+}
+
 // Extract code structure from a file
 export async function extractChunks(filePath) {
   try {
@@ -330,6 +343,7 @@ export async function extractChunks(filePath) {
         startLine: startPos,
         endLine: endPos,
         lines,
+        tokens: calculateTokenCount(funcCode),
         code: funcCode,
         mtime: stat.mtimeMs,
         doc: docComment,
@@ -392,6 +406,7 @@ export async function extractChunks(filePath) {
         startLine: startPos,
         endLine: endPos,
         lines,
+        tokens: calculateTokenCount(classCode),
         code: classCode,
         mtime: stat.mtimeMs,
         doc: docComment,
@@ -461,6 +476,7 @@ export async function extractChunks(filePath) {
           startLine: methodStartPos,
           endLine: methodEndPos,
           lines: methodLines,
+          tokens: calculateTokenCount(methodCode),
           code: methodCode,
           mtime: stat.mtimeMs,
           doc: methodDocComment,
@@ -522,6 +538,7 @@ export async function extractChunks(filePath) {
           startLine: propStartPos,
           endLine: propEndPos,
           lines: propLines,
+          tokens: calculateTokenCount(propCode),
           code: propCode,
           mtime: stat.mtimeMs,
           propertyType: propType,
@@ -593,6 +610,7 @@ export async function extractChunks(filePath) {
         startLine: startPos,
         endLine: endPos,
         lines,
+        tokens: calculateTokenCount(code),
         code,
         mtime: stat.mtimeMs,
         doc: '',
@@ -621,6 +639,7 @@ export async function extractChunks(filePath) {
       startLine: 0,
       endLine: content.split('\n').length - 1,
       lines: content.split('\n').length,
+      tokens: calculateTokenCount(content),
       code: content.substring(0, Math.min(150, content.length)) + '...',
       mtime: stat.mtimeMs,
       doc: extractFileHeader(content),
@@ -1301,16 +1320,17 @@ export async function queryIndex(query, topK = 8) {
     const results = filteredResults.map(result => {
       const chunk = result.chunk;
       
-      // Base result structure
+      // Base result structure with safe property access
       const formattedResult = {
         score: parseFloat(result.score.toFixed(3)),
-        file: chunk.file,
-        startLine: chunk.startLine + 1,
-        endLine: chunk.endLine + 1,
-        type: chunk.type,
+        file: chunk.file || 'unknown',
+        startLine: (chunk.startLine !== undefined) ? chunk.startLine + 1 : 0,
+        endLine: (chunk.endLine !== undefined) ? chunk.endLine + 1 : 0,
+        type: chunk.type || 'unknown',
         name: chunk.name || '',
         qualifiedName: chunk.qualifiedName || '',
-        lines: chunk.lines,
+        lines: chunk.lines || 0,
+        tokens: chunk.tokens || 0,
         doc: chunk.doc || '',
         code: chunk.code ? (chunk.code.length > 140 ? 
           chunk.code.replace(/\s+/g, ' ').slice(0, 140) + '...' : 

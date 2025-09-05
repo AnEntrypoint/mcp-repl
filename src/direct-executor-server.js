@@ -1192,7 +1192,19 @@ const createToolHandlers = () => {
           outputLines.push({ type: 'text', text: `Found ${result.results.length} result(s):` });
           
           for (const res of result.results) {
-            const title = `[${res.score}] ${res.file}:${res.startLine}-${res.endLine} - ${res.type} ${res.qualifiedName}`;
+            // Create relative path for display
+            const filePath = res.file || 'unknown';
+            const relativePath = filePath.startsWith(effectiveWorkingDir) 
+              ? path.relative(effectiveWorkingDir, filePath)
+              : path.basename(filePath);
+            
+            // Handle undefined values gracefully and fix duplicate type display
+            const startLine = res.startLine || 0;
+            const endLine = res.endLine || 0;
+            const lines = res.lines || 0;
+            const tokens = res.tokens || 0;
+            
+            const title = `[${res.score}] ${relativePath}:${startLine}-${endLine} - ${res.code || res.qualifiedName || res.name || 'code'}`;
             let details = [];
             
             if (res.structure?.parameters && res.structure.parameters.length > 0) {
@@ -1206,8 +1218,7 @@ const createToolHandlers = () => {
             if (res.structure?.calls && res.structure.calls.length > 0) {
               details.push(`Calls: ${res.structure.calls.join(', ')}`);
             }
-            details.push(`Lines: ${res.lines}`);
-            if (res.code) details.push(`Code snippet: ${res.code}`);
+            details.push(`Lines: ${lines}, Tokens: ${tokens}`);
             
             outputLines.push({
               type: 'text',
@@ -1439,7 +1450,19 @@ const callToolHandler = async (request) => {
           
           // Add each result
           for (const res of result.results) {
-            const title = `[${res.score}] ${res.file}:${res.startLine}-${res.endLine} - ${res.type} ${res.qualifiedName}`;
+            // Create relative path for display
+            const filePath = res.file || 'unknown';
+            const relativePath = filePath.startsWith(result.searchFolders[0] || '') 
+              ? path.relative(result.searchFolders[0] || '', filePath)
+              : path.basename(filePath);
+            
+            // Handle undefined values gracefully and fix duplicate type display
+            const startLine = res.startLine || 0;
+            const endLine = res.endLine || 0;
+            const lines = res.lines || 0;
+            const tokens = res.tokens || 0;
+            
+            const title = `[${res.score}] ${relativePath}:${startLine}-${endLine} - ${res.code || res.qualifiedName || res.name || 'code'}`;
             let details = [];
             
             if (res.structure?.parameters && res.structure.parameters.length > 0) {
@@ -1453,8 +1476,7 @@ const callToolHandler = async (request) => {
             if (res.structure?.calls && res.structure.calls.length > 0) {
               details.push(`Calls: ${res.structure.calls.join(', ')}`);
             }
-            details.push(`Lines: ${res.lines}`);
-            if (res.code) details.push(`Code snippet: ${res.code}`);
+            details.push(`Lines: ${lines}, Tokens: ${tokens}`);
             
             outputLines.push({
               type: 'text',
