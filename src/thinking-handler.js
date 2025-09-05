@@ -8,7 +8,19 @@ export const handleSequentialThinking = async (args, serverWorkingDir) => {
   try {
     const { thoughts, workingDirectory, parentId } = args;
     
-    if (!workingDirectory) throw new Error('Working directory is required for sequential thinking tool');
+    if (!workingDirectory) {
+      return {
+        content: [
+          { type: 'text', text: '**WORKING DIRECTORY REQUIRED**' },
+          { type: 'text', text: 'The sequential thinking tool needs a workingDirectory parameter to store thought data locally.' },
+          { type: 'text', text: '' },
+          { type: 'text', text: 'Please provide the workingDirectory parameter:' },
+          { type: 'text', text: '• Example: { "workingDirectory": "/path/to/your/project" }' },
+          { type: 'text', text: '• This creates .sequential-thoughts/ subdirectory for JSON data storage' },
+          { type: 'text', text: '• Required for local data persistence and thought chain tracking' }
+        ]
+      };
+    }
     
     const dirValidation = validateWorkingDirectory(workingDirectory, serverWorkingDir);
     if (!dirValidation.valid) throw new Error(`Invalid working directory: ${dirValidation.error}`);
@@ -63,8 +75,6 @@ export const getSequentialThinkingToolDefinition = () => {
 
 **CRITICAL USAGE REQUIREMENT**: Always use this tool for all thinking processes, no exceptions.
 
-**MANDATORY WORKING DIRECTORY**: Required parameter for storing thought data locally in JSON files.
-
 **BATCHING SUPPORT**: Process multiple sequential thoughts in single operation for maximum efficiency.
 • Single thought: pass string directly
 • Multiple thoughts: pass array of strings
@@ -84,7 +94,20 @@ export const getSequentialThinkingToolDefinition = () => {
 • Processing performance metrics
 • Thought relationship mapping
 
-**ALWAYS USE INSTRUCTION**: Use this tool for all thinking processes, no exceptions.`,
+**ALWAYS USE INSTRUCTION**: Use this tool for all thinking processes, no exceptions.
+
+**🚨 WORKING DIRECTORY REQUIRED 🚨**
+• **MANDATORY PARAMETER**: workingDirectory must be specified for ALL operations
+• **EXAMPLE**: { "workingDirectory": "/path/to/your/project" }
+• **PURPOSE**: Defines the exact directory scope for the operation
+• **CRITICAL**: Operations will fail or provide unhelpful guidance without this parameter
+
+**AUTOMATIC RESPONSE TRUNCATION & OVERFLOW HANDLING:**
+• **25k Token Limit**: Responses exceeding ~25,000 tokens are automatically truncated
+• **Overflow Storage**: Excess content stored in \`.call_overflow/\` directory within workingDirectory
+• **Seamless Retrieval**: Use \`retrieve_overflow\` tool to access stored content chunks
+• **Preservation Guarantee**: Leading content always preserved, nothing lost permanently
+• **Clear Instructions**: Truncation notices provide exact steps to retrieve remaining content`,
     inputSchema: {
       type: 'object',
       properties: {

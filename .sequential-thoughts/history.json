@@ -1,0 +1,115 @@
+{
+  "history": [
+    {
+      "action": "create",
+      "thoughtId": "thought_1",
+      "timestamp": "2025-09-05T12:04:34.731Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_2",
+      "timestamp": "2025-09-05T12:04:34.733Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_3",
+      "timestamp": "2025-09-05T12:04:34.733Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_4",
+      "timestamp": "2025-09-05T12:04:34.733Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_5",
+      "timestamp": "2025-09-05T12:08:31.231Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_6",
+      "timestamp": "2025-09-05T12:09:25.394Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_7",
+      "timestamp": "2025-09-05T12:09:25.394Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_8",
+      "timestamp": "2025-09-05T12:09:25.394Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_9",
+      "timestamp": "2025-09-05T12:09:25.394Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_10",
+      "timestamp": "2025-09-05T12:17:49.392Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_11",
+      "timestamp": "2025-09-05T12:22:18.181Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_12",
+      "timestamp": "2025-09-05T12:24:05.037Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_13",
+      "timestamp": "2025-09-05T12:24:05.037Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_14",
+      "timestamp": "2025-09-05T12:24:05.037Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_15",
+      "timestamp": "2025-09-05T12:24:05.037Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_16",
+      "timestamp": "2025-09-05T12:24:05.037Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_17",
+      "timestamp": "2025-09-05T12:24:52.387Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_18",
+      "timestamp": "2025-09-05T12:24:52.387Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_19",
+      "timestamp": "2025-09-05T12:24:52.387Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_20",
+      "timestamp": "2025-09-05T12:24:52.387Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_21",
+      "timestamp": "2025-09-05T12:24:52.387Z"
+    },
+    {
+      "action": "create",
+      "thoughtId": "thought_22",
+      "timestamp": "2025-09-05T12:46:42.373Z"
+    }
+  ],
+  "totalThoughts": 22
+}

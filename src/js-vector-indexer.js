@@ -21,7 +21,14 @@ const INDEX_DIR = './code_search_index';
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 const DEFAULT_DIM = 384; // Dimension size for the chosen model
 const DEFAULT_EXTS = ['js', 'ts'];
-const DEFAULT_IGNORES = ['node_modules'];
+const DEFAULT_IGNORES = [
+  'node_modules', '.git', '.node_modules', 
+  'dist', 'build', 'coverage', '.nyc_output',
+  'tmp', 'temp', '.tmp', '.cache', '.parcel-cache',
+  '.next', '.nuxt', '.vuepress', '.docusaurus',
+  'public', 'static', 'assets', 'images', 'img',
+  '.vscode', '.idea', '.DS_Store', 'Thumbs.db'
+];
 const INDEX_FILE = 'code_index.json';
 const VECTOR_INDEX_FILE = 'vector_index.json';
 
@@ -111,9 +118,9 @@ export async function initialize(indexDir = INDEX_DIR) {
       mkdirSync(indexDir, { recursive: true });
     }
 
-    // Initialize embedding model with WASM backend
+    // Initialize embedding model with WASM backend (with timeout)
     try {
-      embedder = await pipeline('feature-extraction', DEFAULT_MODEL, {
+      const modelPromise = pipeline('feature-extraction', DEFAULT_MODEL, {
         env: {
           backends: {
             onnx: {
@@ -124,19 +131,34 @@ export async function initialize(indexDir = INDEX_DIR) {
           }
         }
       });
+      
+      embedder = await Promise.race([
+        modelPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Model loading timeout')), 30000))
+      ]);
     } catch (modelError) {
-      // Fallback to a model that works well with Xenova
-      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-        env: {
-          backends: {
-            onnx: {
-              wasm: {
-                numThreads: 1
+      console.warn('Failed to load default model, trying fallback:', modelError.message);
+      try {
+        const fallbackPromise = pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          env: {
+            backends: {
+              onnx: {
+                wasm: {
+                  numThreads: 1
+                }
               }
             }
           }
-        }
-      });
+        });
+        
+        embedder = await Promise.race([
+          fallbackPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Fallback model timeout')), 30000))
+        ]);
+      } catch (fallbackError) {
+        console.warn('Failed to load fallback model, running without embeddings:', fallbackError.message);
+        embedder = null; // Continue without embeddings
+      }
     }
 
     // Load existing index if available
@@ -177,19 +199,44 @@ export async function gatherFiles(dir, exts = DEFAULT_EXTS, ignores = DEFAULT_IG
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       
-      // Check if the path should be ignored based on standard ignores or .gitignore
-      const isIgnoredByPattern = ignores.some(p => full.includes(p));
+      // Enhanced ignore checking - works for all subfolders
+      const isIgnoredByName = ignores.some(p => entry.name === p || entry.name.startsWith(p));
+      
+      // Check if this path contains any ignored directory at any level
+      const pathParts = full.split(path.sep);
+      const isIgnoredByPath = ignores.some(ignoredDir => {
+        return pathParts.some(pathPart => 
+          pathPart === ignoredDir || 
+          pathPart.startsWith(ignoredDir + '.') || 
+          pathPart.startsWith('.' + ignoredDir)
+        );
+      });
+      
       const isIgnoredByGitignore = shouldIgnorePath(full, gitignorePatterns, dir);
       
-      if (isIgnoredByPattern || isIgnoredByGitignore) {
+      // Skip debug logging in production
+      
+      if (isIgnoredByName || isIgnoredByPath || isIgnoredByGitignore) {
         continue;
       }
       
       if (entry.isDirectory()) {
+        // Pass all ignore patterns to subdirectory search
         const subDirFiles = await gatherFiles(full, exts, ignores);
         results.push(...subDirFiles);
       } else if (exts.includes(path.extname(entry.name).slice(1))) {
-        results.push(full);
+        // Only skip obvious build artifacts and system files - keep all source code
+        const fileName = entry.name.toLowerCase();
+        const shouldSkipFile = 
+          fileName.includes('.min.') ||             // minified files
+          fileName.includes('.bundle.') ||          // webpack bundles
+          fileName.endsWith('.d.ts') ||             // TypeScript definitions (generated)
+          fileName.startsWith('._') ||              // system files
+          fileName.endsWith('.map');                // source maps
+          
+        if (!shouldSkipFile) {
+          results.push(full);
+        }
       }
     }
   } catch (error) {
@@ -789,46 +836,41 @@ function createEmbeddingText(chunk) {
   return parts.join(' ');
 }
 
-// Generate embedding for a text
-// Enhanced text preparation for better embeddings
+// Optimized text preparation for faster embedding generation
 function prepareTextForEmbedding(chunk) {
-  let text = '';
+  // Fast path for simple chunks
+  if (!chunk.doc && !chunk.parameters && !chunk.code) {
+    return `${chunk.type || ''} ${chunk.name || ''}`.trim();
+  }
   
-  // Add type and name for context
+  const parts = [];
+  
+  // Essential info first (most important for search)
   if (chunk.type && chunk.name) {
-    text += `${chunk.type} ${chunk.name}. `;
+    parts.push(`${chunk.type} ${chunk.name}`);
   }
   
-  // Add documentation/comments (highest semantic value)
+  // Documentation (high semantic value)
   if (chunk.doc) {
-    text += `Documentation: ${chunk.doc}. `;
+    parts.push(chunk.doc.substring(0, 100)); // Limit doc length
   }
   
-  // Add parameter information for functions
-  if (chunk.parameters && chunk.parameters.length > 0) {
-    const paramText = chunk.parameters.map(p => `${p.name}${p.type ? ': ' + p.type : ''}`).join(', ');
-    text += `Parameters: ${paramText}. `;
+  // Function signatures (important for functions)
+  if (chunk.parameters && chunk.parameters.length > 0 && chunk.parameters.length < 10) {
+    const paramText = chunk.parameters.map(p => p.name).join(' '); // Just names, skip types for speed
+    parts.push(paramText);
   }
   
-  // Add return type if available
-  if (chunk.returnType) {
-    text += `Returns: ${chunk.returnType}. `;
+  // Minimal code context (reduced for speed)
+  if (chunk.code && chunk.code.length < 500) {
+    const cleanCode = chunk.code
+      .replace(/[{};,()[\]]/g, ' ')  // Remove syntax noise quickly
+      .replace(/\s+/g, ' ')          // Normalize whitespace
+      .substring(0, 150);            // Limit length
+    parts.push(cleanCode);
   }
   
-  // Add semantic keywords extracted from code
-  const semanticKeywords = extractSemanticKeywords(chunk.code || '');
-  if (semanticKeywords.length > 0) {
-    text += `Keywords: ${semanticKeywords.join(', ')}. `;
-  }
-  
-  // Add clean code snippet (without excessive syntax)
-  if (chunk.code) {
-    const cleanCode = cleanCodeForEmbedding(chunk.code);
-    text += `Code: ${cleanCode}`;
-  }
-  
-  // Limit text length for embedding model
-  return text.substring(0, 512); // Keep within reasonable limits
+  return parts.join(' ').substring(0, 300); // Shorter limit for faster processing
 }
 
 // Extract semantic keywords from code
@@ -932,11 +974,13 @@ export async function syncIndex(folders, exts = DEFAULT_EXTS, ignores = DEFAULT_
     files.push(...folderFiles);
   }
   
-  // Process files and extract chunks
+  // Process files and extract chunks (optimized batch processing)
   let newChunksCount = 0;
   const allNewChunks = [];
   const updatedChunkIds = new Set();
+  const chunksNeedingEmbeddings = [];
   
+  // First pass: extract all chunks and identify what needs embeddings
   for (const file of files) {
     try {
       const fileChunks = await extractChunks(file);
@@ -950,15 +994,31 @@ export async function syncIndex(folders, exts = DEFAULT_EXTS, ignores = DEFAULT_
           continue;
         }
         
-        // Generate embedding for the chunk
-        const text = createEmbeddingText(chunk);
-        chunk.embedding = await generateEmbedding(text, chunk);
-        
         allNewChunks.push(chunk);
+        if (embedder) {
+          chunksNeedingEmbeddings.push(chunk);
+        } else {
+          chunk.embedding = null;
+        }
         newChunksCount++;
       }
     } catch (error) {
-      // Silently handle errors
+      // Silently handle file processing errors
+    }
+  }
+  
+  // Second pass: batch generate embeddings for better performance
+  if (embedder && chunksNeedingEmbeddings.length > 0) {
+    const BATCH_SIZE = 20; // Process embeddings in batches
+    for (let i = 0; i < chunksNeedingEmbeddings.length; i += BATCH_SIZE) {
+      const batch = chunksNeedingEmbeddings.slice(i, i + BATCH_SIZE);
+      const batchPromises = batch.map(async (chunk) => {
+        const text = prepareTextForEmbedding(chunk); // Use optimized version
+        chunk.embedding = await generateEmbedding(text, chunk);
+      });
+      
+      // Process batch concurrently
+      await Promise.all(batchPromises);
     }
   }
   
@@ -1208,6 +1268,44 @@ function getTypeBoost(query, type) {
     case 'import': return 0.8;
     case 'file': return 0.7; // Files are less likely to be direct search targets
     default: return 1.0;
+  }
+}
+
+// Main search function that tools expect
+export async function searchSemantic(query, options = {}) {
+  const {
+    workingDirectory = process.cwd(),
+    topK = 8,
+    extensions = DEFAULT_EXTS,
+    ignores = DEFAULT_IGNORES
+  } = options;
+
+  try {
+    // Quick check if directory exists and is accessible
+    if (!existsSync(workingDirectory)) {
+      console.error(`Working directory does not exist: ${workingDirectory}`);
+      return [];
+    }
+
+    // Initialize if needed (with timeout)
+    const initPromise = isInitialized ? Promise.resolve() : initialize();
+    const initResult = await Promise.race([
+      initPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Initialization timeout')), 10000))
+    ]);
+
+    // Sync index for the working directory 
+    const stats = await fs.stat(workingDirectory).catch(() => null);
+    if (stats && stats.isDirectory()) {
+      await syncIndex([workingDirectory], extensions, ignores);
+    }
+
+    // Query the index
+    const results = await queryIndex(query, topK);
+    return results;
+  } catch (error) {
+    console.error('Error in searchSemantic:', error);
+    return [];
   }
 }
 
