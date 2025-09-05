@@ -4,7 +4,11 @@
 import * as path from 'node:path';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import descriptions from './tool-descriptions.json' with { type: 'json' };
+// Load tool descriptions JSON in a Node-compatible way (avoid import assertions which
+// may not be supported in some Node versions). Use readFileSync + JSON.parse so
+// the server always has the tool metadata available.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const descriptions = JSON.parse(readFileSync(path.join(__dirname, 'tool-descriptions.json'), 'utf8'));
 // Handle version flag
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
