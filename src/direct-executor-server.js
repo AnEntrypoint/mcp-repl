@@ -32,6 +32,7 @@ import {
 import { spawn } from 'child_process';
 import { existsSync, statSync } from 'fs';
 import { validateWorkingDirectory } from './validation-utils.js';
+import { applyTruncation } from './output-truncation.js';
 
 // Lazy load vector indexer to avoid startup issues
 let vectorIndexer = null;
@@ -47,6 +48,9 @@ let astgrepUtils = null;
 let astgrepAdvanced = null;
 let astgrepHandlers = null;
 let astgrepHandlersAdvanced = null;
+
+// Lazy load batch handler
+let batchHandler = null;
 const getAstGrepUtils = async () => {
   if (!astgrepUtils) {
     astgrepUtils = await import('./astgrep-utils.js');
@@ -61,6 +65,13 @@ const getAstGrepUtils = async () => {
     astgrepHandlersAdvanced = await import('./astgrep-handlers-advanced.js');
   }
   return { astgrepUtils, astgrepAdvanced, astgrepHandlers, astgrepHandlersAdvanced };
+};
+
+const getBatchHandler = async () => {
+  if (!batchHandler) {
+    batchHandler = await import('./batch-handler.js');
+  }
+  return batchHandler;
 };
 
 // Get the working directory from command line or use current directory
@@ -319,6 +330,36 @@ const listToolsHandler = async () => {
             }
           },
           required: ["pattern"]
+        }
+      },
+      {
+        name: "batch_execute",
+        description: "Execute multiple MCP tool operations in sequence as a single batch. Supports all existing tools: executenodejs, executedeno, searchcode, astgrep_search, astgrep_replace, astgrep_lint, astgrep_analyze. Handles errors gracefully by continuing with remaining operations and reporting which ones failed.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            operations: {
+              type: "array",
+              description: "Array of tool operations to execute in sequence",
+              items: {
+                type: "object",
+                properties: {
+                  tool: {
+                    type: "string",
+                    enum: ["executenodejs", "executedeno", "searchcode", "astgrep_search", "astgrep_replace", "astgrep_lint", "astgrep_analyze"],
+                    description: "Name of the MCP tool to execute"
+                  },
+                  parameters: {
+                    type: "object",
+                    description: "Parameters to pass to the tool (same as individual tool parameters)"
+                  }
+                },
+                required: ["tool", "parameters"]
+              },
+              minItems: 1
+            }
+          },
+          required: ["operations"]
         }
       }
     ],
@@ -656,6 +697,143 @@ const performCodeSearch = async (query, folders, extensions, ignores, topK, work
   }
 };
 
+// Create tool handlers map for batch execution
+const createToolHandlers = () => {
+  return {
+    executenodejs: async (request) => {
+      const { code, timeout = 120000, workingDirectory } = request.params.arguments;
+      
+      if (!code) {
+        throw new Error("Missing code argument for execute tool");
+      }
+      
+      const result = await executeCode(code, timeout, workingDirectory);
+      
+      const outputLines = [];
+      if (result.stdout) {
+        outputLines.push({ type: 'text', text: result.stdout.trim() });
+      }
+      if (result.stderr) {
+        outputLines.push({ type: 'text', text: `ERROR: ${result.stderr.trim()}` });
+      }
+      if (!result.success && result.error) {
+        outputLines.push({ type: 'text', text: `ERROR: ${result.error}` });
+      }
+      outputLines.push({
+        type: 'text',
+        text: `Execution completed in ${result.executionTimeMs}ms with exit code ${result.code || 0}`
+      });
+      
+      return { content: outputLines };
+    },
+    
+    executedeno: async (request) => {
+      const { code, timeout = 120000, workingDirectory } = request.params.arguments;
+      
+      if (!code) {
+        throw new Error("Missing code argument for Deno execute tool");
+      }
+      
+      const result = await executeDenoCode(code, timeout, workingDirectory);
+      
+      const outputLines = [];
+      if (result.stdout) {
+        outputLines.push({ type: 'text', text: result.stdout.trim() });
+      }
+      if (result.stderr) {
+        outputLines.push({ type: 'text', text: `ERROR: ${result.stderr.trim()}` });
+      }
+      if (!result.success && result.error) {
+        outputLines.push({ type: 'text', text: `ERROR: ${result.error}` });
+      }
+      outputLines.push({
+        type: 'text',
+        text: `Deno execution completed in ${result.executionTimeMs}ms with exit code ${result.code || 0}`
+      });
+      
+      return { content: outputLines };
+    },
+    
+    searchcode: async (request) => {
+      const { query, folders, extensions, ignores, topK, workingDirectory } = request.params.arguments;
+      
+      if (!query) {
+        throw new Error("Missing query argument for code search tool");
+      }
+      
+      const result = await performCodeSearch(query, folders, extensions, ignores, topK, workingDirectory);
+      
+      const outputLines = [];
+      
+      if (result.success) {
+        outputLines.push({
+          type: 'text',
+          text: `Code search for "${query}"\nSearched in: ${result.searchFolders.join(', ')}\nIncluded extensions: ${result.searchExts.join(', ')}\nIgnored patterns: ${result.searchIgnores.join(', ')}`
+        });
+        
+        if (result.results.length === 0) {
+          outputLines.push({ type: 'text', text: 'No results found.' });
+        } else {
+          outputLines.push({ type: 'text', text: `Found ${result.results.length} result(s):` });
+          
+          for (const res of result.results) {
+            const title = `[${res.score}] ${res.file}:${res.startLine}-${res.endLine} - ${res.type} ${res.qualifiedName}`;
+            let details = [];
+            
+            if (res.structure?.parameters && res.structure.parameters.length > 0) {
+              const paramText = res.structure.parameters.map(p => `${p.name}${p.type ? `: ${p.type}` : ''}`).join(', ');
+              details.push(`Parameters: ${paramText}`);
+            }
+            if (res.structure?.returnType) details.push(`Return type: ${res.structure.returnType}`);
+            if (res.structure?.parentClass) details.push(`Parent class: ${res.structure.parentClass}`);
+            if (res.structure?.inheritsFrom) details.push(`Extends: ${res.structure.inheritsFrom}`);
+            if (res.doc) details.push(`Doc: ${res.doc}`);
+            if (res.structure?.calls && res.structure.calls.length > 0) {
+              details.push(`Calls: ${res.structure.calls.join(', ')}`);
+            }
+            details.push(`Lines: ${res.lines}`);
+            if (res.code) details.push(`Code snippet: ${res.code}`);
+            
+            outputLines.push({
+              type: 'text',
+              text: `${title}\n${details.join('\n')}`
+            });
+          }
+        }
+        
+        outputLines.push({
+          type: 'text',
+          text: `Search completed in ${result.executionTimeMs}ms`
+        });
+      } else {
+        outputLines.push({ type: 'text', text: `ERROR: ${result.error}` });
+      }
+      
+      return { content: outputLines };
+    },
+    
+    astgrep_search: async (request) => {
+      const { astgrepHandlers } = await getAstGrepUtils();
+      return await astgrepHandlers.handleAstGrepSearch(request.params.arguments, workingDir, getAstGrepUtils);
+    },
+    
+    astgrep_replace: async (request) => {
+      const { astgrepHandlers } = await getAstGrepUtils();
+      return await astgrepHandlers.handleAstGrepReplace(request.params.arguments, workingDir, getAstGrepUtils);
+    },
+    
+    astgrep_lint: async (request) => {
+      const { astgrepHandlersAdvanced } = await getAstGrepUtils();
+      return await astgrepHandlersAdvanced.handleAstGrepLint(request.params.arguments, workingDir, getAstGrepUtils);
+    },
+    
+    astgrep_analyze: async (request) => {
+      const { astgrepHandlersAdvanced } = await getAstGrepUtils();
+      return await astgrepHandlersAdvanced.handleAstGrepAnalyze(request.params.arguments, workingDir, getAstGrepUtils);
+    }
+  };
+};
+
 // Handle code execution requests
 const callToolHandler = async (request) => {
   try {
@@ -705,9 +883,9 @@ const callToolHandler = async (request) => {
         text: `Execution completed in ${result.executionTimeMs}ms with exit code ${result.code || 0}`
       });
       
-      return {
+      return applyTruncation({
         content: outputLines
-      };
+      });
     }
     
     // Handle Deno execution
@@ -754,9 +932,9 @@ const callToolHandler = async (request) => {
         text: `Deno execution completed in ${result.executionTimeMs}ms with exit code ${result.code || 0}`
       });
       
-      return {
+      return applyTruncation({
         content: outputLines
-      };
+      });
     }
     
     // Handle code search
@@ -831,45 +1009,56 @@ const callToolHandler = async (request) => {
         });
       }
       
-      return {
+      return applyTruncation({
         content: outputLines
-      };
+      });
     }
     
     // Handle ast-grep search
     if (name === 'astgrep_search') {
       const { astgrepHandlers } = await getAstGrepUtils();
-      return await astgrepHandlers.handleAstGrepSearch(args, workingDir, getAstGrepUtils);
+      const result = await astgrepHandlers.handleAstGrepSearch(args, workingDir, getAstGrepUtils);
+      return applyTruncation(result);
     }
     
     // Handle ast-grep replace
     if (name === 'astgrep_replace') {
       const { astgrepHandlers } = await getAstGrepUtils();
-      return await astgrepHandlers.handleAstGrepReplace(args, workingDir, getAstGrepUtils);
+      const result = await astgrepHandlers.handleAstGrepReplace(args, workingDir, getAstGrepUtils);
+      return applyTruncation(result);
     }
     
     // Handle ast-grep lint
     if (name === 'astgrep_lint') {
       const { astgrepHandlersAdvanced } = await getAstGrepUtils();
-      return await astgrepHandlersAdvanced.handleAstGrepLint(args, workingDir, getAstGrepUtils);
+      const result = await astgrepHandlersAdvanced.handleAstGrepLint(args, workingDir, getAstGrepUtils);
+      return applyTruncation(result);
     }
     
     // Handle ast-grep analyze
     if (name === 'astgrep_analyze') {
       const { astgrepHandlersAdvanced } = await getAstGrepUtils();
-      return await astgrepHandlersAdvanced.handleAstGrepAnalyze(args, workingDir, getAstGrepUtils);
+      const result = await astgrepHandlersAdvanced.handleAstGrepAnalyze(args, workingDir, getAstGrepUtils);
+      return applyTruncation(result);
+    }
+    
+    // Handle batch execute
+    if (name === 'batch_execute') {
+      const { handleBatchExecute } = await getBatchHandler();
+      const result = await handleBatchExecute(args, workingDir, createToolHandlers);
+      return applyTruncation(result);
     }
     
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
-    return {
+    return applyTruncation({
       content: [
         {
           type: 'text',
           text: `ERROR: ${error.message}`
         }
       ]
-    };
+    });
   }
 };
 
